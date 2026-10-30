@@ -574,7 +574,9 @@ export function useWorkflowDocumentNodes(deps: WorkflowDocumentNodesDeps) {
 		invalid: INodeCredentialsDetails;
 		type: string;
 	}) {
-		nodes.value.forEach((node: INodeUi) => {
+		let changed = false;
+
+		nodes.value.forEach((node: INodeUi, nodeIndex: number) => {
 			const nodeCredentials: INodeCredentials | undefined = (node as unknown as INode).credentials;
 			if (!nodeCredentials?.[data.type]) {
 				return;
@@ -582,25 +584,35 @@ export function useWorkflowDocumentNodes(deps: WorkflowDocumentNodesDeps) {
 
 			const nodeCredentialDetails: INodeCredentialsDetails | string = nodeCredentials[data.type];
 
+			let shouldReplace: boolean;
+			if (typeof nodeCredentialDetails === 'string') {
+				shouldReplace = nodeCredentialDetails === data.invalid.name;
+			} else if (nodeCredentialDetails.id === null) {
+				shouldReplace = nodeCredentialDetails.name === data.invalid.name;
+			} else {
+				shouldReplace = nodeCredentialDetails.id === data.invalid.id;
+			}
+
+			if (!shouldReplace) {
+				return;
+			}
+
+			// Update through updateNodeAtIndex rather than mutating the node in place:
+			// an in-place mutation is invisible to change tracking, so the follow-up
+			// updateNodeProperties call for the edited node sees no difference and the
+			// workflow is never marked dirty (and so never saved).
 			if (
-				typeof nodeCredentialDetails === 'string' &&
-				nodeCredentialDetails === data.invalid.name
+				updateNodeAtIndex(nodeIndex, {
+					credentials: { ...nodeCredentials, [data.type]: data.credentials },
+				})
 			) {
-				(node.credentials as INodeCredentials)[data.type] = data.credentials;
-				return;
-			}
-
-			if (nodeCredentialDetails.id === null) {
-				if (nodeCredentialDetails.name === data.invalid.name) {
-					(node.credentials as INodeCredentials)[data.type] = data.credentials;
-				}
-				return;
-			}
-
-			if (nodeCredentialDetails.id === data.invalid.id) {
-				(node.credentials as INodeCredentials)[data.type] = data.credentials;
+				changed = true;
 			}
 		});
+
+		if (changed) {
+			void onStateDirty.trigger();
+		}
 	}
 
 	// Assign credential to all nodes that support it but don't have it set
